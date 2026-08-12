@@ -45,36 +45,78 @@ Door and window-switch inputs use `INPUT_PULLUP` in the current software. The ac
 
 ドア入力とウインドウスイッチ入力は現行ソフトでは`INPUT_PULLUP`を使用し、スイッチON状態はLOWです。
 
-## Power architecture / 電源構成
+## Door-switch sensing / ドアスイッチ入力の読み取り
 
-This controller is not powered only from the vehicle IG/ACC circuit. It also requires a connection to the vehicle's always-on battery supply (BATT). The always-on supply is switched by an external MOSFET-based power-hold circuit, allowing the Arduino and the required control circuitry to remain powered after IG/ACC is switched OFF.
+The door-switch signals have two separate functions in this system:
 
-本コントローラーは、車両のIG/ACC電源だけで動作する構成ではありません。車両の常時電源（BATT）にも接続し、その常時電源から制御回路への給電を外部のMOSFETを使用した電源保持回路で開閉します。これにより、IG/ACCがOFFになった後もArduinoおよび必要な制御回路への給電を継続できます。
+- hardware startup of the controller power supply
+- door-state sensing by the Arduino
 
-IG/ACC is therefore used primarily as a vehicle-key-state input rather than as the only controller power source. The software reads IG/ACC on D12 and controls the external power-hold circuit from D13.
+本システムでは、ドアスイッチ信号を次の2つの目的に使用します。
 
-したがってIG/ACCは、コントローラーを直接給電する唯一の電源というより、車両のキー状態を判定するための入力として使用します。ソフトウェアはD12でIG/ACC状態を読み取り、D13から外部の電源保持回路を制御します。
+- 制御系電源を起動するためのハードウェアトリガー
+- Arduinoによるドア開閉状態の読み取り
 
-A conceptual power arrangement is shown below. The exact MOSFET, regulator, protection devices, and high-side/low-side implementation depend on the actual hardware design.
+The Arduino reads the right and left door states independently on D6 and D7. The current software configures both pins as `INPUT_PULLUP` and treats LOW as the active door-open state.
 
-概念的な電源構成を以下に示します。MOSFET、レギュレータ、保護素子、およびハイサイド／ローサイド等の具体的な回路方式は、実際のハードウェア設計に合わせて構成してください。
+Arduinoは右ドアをD6、左ドアをD7で個別に読み取ります。現行ソフトでは両入力を`INPUT_PULLUP`とし、LOWをドア開状態として扱います。
+
+The implemented hardware includes diodes in the two Arduino door-sensing paths to prevent unwanted reverse current toward the vehicle-side door-switch circuits. The exact diode type and vehicle-side electrical polarity are not specified here.
+
+実装したハードウェアでは、Arduino側の左右ドア入力経路にダイオードを設け、制御回路から車両ドアスイッチ回路側への不要な逆流を防止します。ダイオードの具体的な型番および車両側ドアスイッチの電気的極性については、ここでは規定しません。
 
 ```text
-Vehicle battery (BATT, always on)
+Right door switch ----> diode / sensing path ----> D6
+Left door switch -----> diode / sensing path ----> D7
+```
+
+The door-startup path described below and the Arduino sensing path serve different purposes. A door operation can first turn the controller power ON through the hardware startup circuit; after the Arduino starts, the software reads D6/D7 and performs the required door-linked control.
+
+後述するドアによる電源起動経路とArduinoによるドア状態読み取り経路は、役割が異なります。まずドア操作によってハードウェア起動回路から制御系電源をONにし、その後Arduinoが起動してD6/D7を読み取り、必要なドア連動制御を実行します。
+
+## Power architecture / 電源構成
+
+This controller is not powered only from the vehicle IG/ACC circuit. It also requires a connection to the vehicle's always-on battery supply (BATT). The controller supply is switched by an external high-side P-channel MOSFET so that the controller can be started by IG/ACC or door operation and can subsequently keep itself powered through Arduino D13.
+
+本コントローラーは、車両のIG/ACC電源だけで動作する構成ではありません。車両の常時電源（BATT）にも接続し、外部のハイサイドPチャネルMOSFETで制御系電源を開閉します。これにより、IG/ACCまたはドア操作から制御系を起動し、その後Arduino D13によって自己保持できます。
+
+The P-channel MOSFET gate is normally pulled toward the OFF state by a pull-up resistor. Four independent optocoupler paths act on the common gate-control node:
+
+1. IG/ACC startup
+2. Right-door startup
+3. Left-door startup
+4. Arduino D13 self-hold
+
+PチャネルMOSFETのゲートはプルアップ抵抗によって通常はOFF側に保持されます。共通のゲート制御点に対して、次の4系統の独立したフォトカプラ経路を設けます。
+
+1. IG/ACCによる起動
+2. 右ドアによる起動
+3. 左ドアによる起動
+4. Arduino D13による自己保持
+
+When any one of these paths becomes active, the common MOSFET gate is pulled toward GND and the P-channel MOSFET turns ON, supplying the controller from the always-on battery source. All four paths therefore control the same controller-power MOSFET.
+
+これらのいずれか1系統が有効になると、共通のMOSFETゲートがGND側へ引かれてPチャネルMOSFETがONとなり、常時電源から制御系へ給電します。4系統はいずれも同じ制御系電源MOSFETを駆動します。
+
+```text
+Vehicle BATT (always on)
         |
    Fuse / protection
         |
- MOSFET power switch
+ High-side P-ch MOSFET
         |
  Regulator / power circuit
         |
- Arduino + control circuit
-        |
-       D13 --------> MOSFET power-hold control
+ Arduino + current sensors + motor-control circuitry
 
-Vehicle IG/ACC
+P-ch MOSFET gate control:
+
+ pull-up toward OFF
         |
-        +----------> D12 (IG/ACC sense)
+        +---- IG/ACC optocoupler ----+
+        +---- Right-door optocoupler-+----> common gate pull-down
+        +---- Left-door optocoupler--+
+        +---- D13 optocoupler -------+
 ```
 
 ```text
@@ -82,56 +124,77 @@ Vehicle IG/ACC
         |
    ヒューズ／保護回路
         |
- MOSFET電源スイッチ
+ ハイサイドPch MOSFET
         |
  レギュレータ／電源回路
         |
- Arduino＋制御回路
-        |
-       D13 --------> MOSFET電源保持制御
+ Arduino＋電流センサー＋モーター制御部
 
-車両IG/ACC
+Pch MOSFETゲート制御:
+
+ OFF側へのプルアップ
         |
-        +----------> D12（IG/ACC検出）
+        +---- IG/ACCフォトカプラ ----+
+        +---- 右ドアフォトカプラ ----+----> 共通ゲートをGND側へ
+        +---- 左ドアフォトカプラ ----+
+        +---- D13フォトカプラ -------+
 ```
 
-The diagram is a functional block diagram, not a complete vehicle wiring schematic. In particular, the controller must have a valid startup path so that power is initially supplied when IG/ACC is turned ON before the Arduino can assert D13.
+The optocoupler part numbers, LED current-limiting resistor values, MOSFET part number, gate-resistor values, and vehicle-side door-switch electrical polarity are hardware-specific and are not defined here.
 
-上図は機能を示すブロック図であり、車両用の完全な配線図ではありません。特に、Arduinoが起動してD13を出力できるようになる前に、IG/ACC ONを契機として制御回路へ初期給電できる起動経路が必要です。
+フォトカプラの型番、LED電流制限抵抗値、MOSFET型番、ゲート周辺の抵抗値、および車両側ドアスイッチの電気的極性については、ここでは規定しません。
+
+## Door-triggered power startup / ドア操作による電源起動
+
+The door switches are not used only as Arduino inputs. The right and left door signals also have independent optocoupler paths that can turn the controller-power MOSFET ON at hardware level.
+
+ドアスイッチはArduinoへの状態入力だけに使用しているわけではありません。左右のドア信号にはそれぞれ独立したフォトカプラ経路があり、ハードウェアレベルで制御系電源MOSFETをONにできます。
+
+This is required because the Arduino cannot read D6/D7 after its own power has already been removed. If a door is operated while the controller is off, the door-triggered hardware path first turns the controller supply ON. After the Arduino starts, the software can then read the corresponding door input and determine whether partial-down operation should be performed.
+
+これは、Arduino自身の電源が切れた状態ではD6/D7を読み取れないためです。制御系電源OFF中にドアが操作された場合、まずドア起動用ハードウェア経路によって制御系電源をONにします。その後Arduinoが起動し、対応するドア入力を読み取ってパーシャルダウンを実行すべきかを判定します。
+
+Thus IG/ACC, either door, or the Arduino self-hold output can keep the same controller-power MOSFET active:
+
+したがって、IG/ACC、左右いずれかのドア、またはArduinoの自己保持出力のいずれからでも、同じ制御系電源MOSFETをON状態にできます。
+
+```text
+Power ON = IG/ACC OR right door OR left door OR D13 self-hold
+```
 
 ## Power-on and self-hold operation / 電源投入と自己保持動作
 
-When the vehicle key turns IG/ACC ON, the external power circuit must first supply the controller from the vehicle electrical system. After the Arduino starts, the software detects HIGH on D12 and drives D13 HIGH. The external MOSFET power circuit then keeps the BATT-derived controller supply enabled.
+When IG/ACC or either door starts the controller, the external hardware first supplies the controller from the vehicle's always-on electrical system. After the Arduino starts, the software can assert D13. D13 drives its own optocoupler path and keeps the same P-channel MOSFET ON under software control.
 
-車両キーを操作してIG/ACCがONになると、まず外部電源回路によって車両電源からコントローラーへ給電する必要があります。Arduino起動後、ソフトウェアはD12のHIGHを検出してD13をHIGHにし、外部MOSFET電源回路によってBATT由来の制御電源を保持します。
+IG/ACCまたは左右いずれかのドア操作によって制御系が起動すると、まず外部ハードウェアによって車両常時電源から制御系へ給電されます。Arduino起動後はD13を出力でき、D13専用のフォトカプラ経路を介して同じPチャネルMOSFETをソフトウェア制御でON状態に保持します。
 
-In this sense, the controller uses a self-holding power architecture: once started, the Arduino can keep its own external power path active through D13 until the software decides that post-key-off operation is complete.
+In this sense, the controller uses a self-holding power architecture: an external event starts it, and the Arduino then keeps its own external power path active until the software decides that continued operation is no longer required.
 
-この意味で、本コントローラーは自己保持型の電源構成です。一度起動すると、ArduinoはD13を介して自分自身の外部給電経路を保持し、キーOFF後に必要な動作が完了した時点でソフトウェアから電源保持を解除できます。
+この意味で、本コントローラーは自己保持型の電源構成です。外部イベントで起動し、その後Arduino自身が、継続動作が不要と判断するまで外部給電経路を保持します。
 
 ## Key-off operation / キーOFF後の動作
 
-When IG/ACC turns OFF, D12 becomes LOW, but the controller does not immediately lose power because D13 continues to hold the external MOSFET power circuit ON. This allows the controller to continue monitoring the door switches, performing the partial-down / return-up behavior, and retaining the required state information.
+When IG/ACC turns OFF, the controller does not necessarily lose power immediately. If D13 self-hold is active, the controller remains powered and can continue monitoring the door switches, performing partial-down / return-up behavior, and retaining the required state information.
 
-IG/ACCがOFFになるとD12はLOWになりますが、D13によって外部MOSFET電源回路のON状態を保持するため、コントローラーの電源は直ちには切れません。この間もドアスイッチを監視し、パーシャルダウン／復帰UP等の処理や必要な状態保持処理を継続できます。
+IG/ACCがOFFになっても、制御系電源が直ちに切れるとは限りません。D13による自己保持が有効であれば制御系は動作を継続し、ドアスイッチ監視、パーシャルダウン／復帰UP、必要な状態保持処理を継続できます。
 
-The current v0.0 software uses `POWER_HOLD_MS = 180000`, corresponding to a nominal 180-second hold period. Door-open activity refreshes `powerHoldTime`, so the hold period is extended from the latest relevant activity rather than being an unconditional fixed 180 seconds after key-off.
+The current v0.0 software uses `POWER_HOLD_MS = 180000`, corresponding to a nominal 180-second hold period. While IG/ACC is ON the timer is continuously refreshed. A detected door-open condition also refreshes `powerHoldTime`, so the hold period can be extended from door activity.
 
-現行v0.0ソフトウェアでは `POWER_HOLD_MS = 180000`、すなわち公称180秒の保持時間を設定しています。ドア開を検出すると `powerHoldTime` が更新されるため、単純にキーOFFから必ず180秒で切れるのではなく、関連するドア操作を起点として保持時間が延長されます。
+現行v0.0ソフトウェアでは`POWER_HOLD_MS = 180000`、すなわち公称180秒の保持時間を設定しています。IG/ACCがONの間は保持タイマーを継続的に更新し、ドア開を検出した場合にも`powerHoldTime`を更新するため、ドア操作を起点として保持時間を延長できます。
 
-When the hold period expires, the software saves the window state to EEPROM, stops both motor outputs, waits for the configured settle time, and then drives D13 LOW. The external MOSFET circuit can then disconnect the controller from the always-on BATT supply.
+When the hold period expires, the software saves the window state to EEPROM, stops both motor outputs, waits for the configured settle time, and then drives D13 LOW. With no other startup path active, the external MOSFET circuit can then disconnect the controller from the always-on BATT supply.
 
-保持時間が終了すると、ソフトウェアはウインドウ状態をEEPROMへ保存し、左右のモーター出力を停止し、設定された待ち時間の後にD13をLOWにします。これによって外部MOSFET回路が常時電源（BATT）からコントローラーを切り離せる構成とします。
+保持時間が終了すると、ソフトウェアはウインドウ状態をEEPROMへ保存し、左右のモーター出力を停止し、設定された待ち時間の後にD13をLOWにします。このとき他の起動経路が有効でなければ、外部MOSFET回路によって常時電源（BATT）から制御系を切り離すことができます。
 
 ## Why an always-on battery supply is used / 常時電源を使用する理由
 
-The purpose of the BATT connection is not simply to delay shutdown. The power-window controller needs to remain functional after the ignition supply disappears because door operation and partial-down behavior can occur after key-off. A controller powered only from IG/ACC would stop immediately and could not perform these functions.
+The purpose of the BATT connection is not simply to delay shutdown. The power-window controller needs to respond to door operation before key-on and after key-off. A controller powered only from IG/ACC could neither remain operational after key-off nor restart from a door event after its supply had been removed.
 
-BATT接続の目的は、単に電源OFFを遅らせることではありません。パワーウインドウコントローラーでは、キーOFF後にもドア操作やパーシャルダウン動作が発生するため、IG電源が消失した後も制御機能を維持する必要があります。IG/ACCだけから給電する構成では、キーOFFと同時に停止してこれらの処理を実行できません。
+BATT接続の目的は、単に電源OFFを遅らせることではありません。本パワーウインドウコントローラーはキーON前およびキーOFF後のドア操作にも応答する必要があります。IG/ACCだけから給電する構成では、キーOFF後の動作を継続できず、電源停止後にドア操作から再起動することもできません。
 
-Unlike a short capacitor-only hold-up intended merely to finish a shutdown operation, this architecture deliberately uses the vehicle battery as the post-key-off energy source and disconnects it with the MOSFET circuit when continued operation is no longer required.
+Unlike a short capacitor-only hold-up intended merely to finish a shutdown operation, this architecture deliberately uses the vehicle battery as the energy source and disconnects it with the MOSFET circuit when continued operation is no longer required.
 
-単に終了処理を完了するための短時間のコンデンサ保持とは異なり、本構成ではキーOFF後の動作用エネルギー源として車両バッテリーを使用し、継続動作が不要になった時点でMOSFET回路によって切り離します。
+単に終了処理を完了するための短時間のコンデンサ保持とは異なり、本構成では車両バッテリーを動作用エネルギー源として使用し、継続動作が不要になった時点でMOSFET回路によって切り離します。
 
 ## Protection and fail-safe considerations / 保護・フェイルセーフ上の注意
 
@@ -139,10 +202,10 @@ Because this circuit is connected to an always-on vehicle battery supply, approp
 
 本回路は車両の常時電源へ接続するため、保護設計が特に重要です。BATT取り出し部近傍への適切な容量のヒューズ、十分な配線容量、車載サージ対策、必要に応じた逆極性保護、レギュレータおよびMOSFET電源経路の熱設計を行ってください。
 
-The external power-hold circuit should also define a safe MOSFET state while the Arduino is reset, unpowered, or its D13 pin is not yet actively driven. Appropriate gate pull-up or pull-down components and a startup path should be selected for the actual MOSFET topology. A failure that leaves the hold circuit permanently ON can cause continuous standby current and eventually discharge the vehicle battery.
+The external power-hold circuit should also define a safe MOSFET state while the Arduino is reset, unpowered, or its D13 pin is not yet actively driven. The gate pull-up shown conceptually above provides the normal OFF direction; the detailed component values must be selected for the actual hardware. A failure that leaves the hold circuit permanently ON can cause continuous standby current and eventually discharge the vehicle battery.
 
-また、Arduinoがリセット中、無給電、またはD13をまだ能動的に駆動していない状態でも、外部電源保持回路のMOSFET状態が不定にならないようにしてください。実際のMOSFET構成に応じて適切なゲートのプルアップ／プルダウンおよび起動経路を設ける必要があります。電源保持回路が異常により常時ONになると、暗電流が継続して車両バッテリーを放電させる可能性があります。
+また、Arduinoがリセット中、無給電、またはD13をまだ能動的に駆動していない状態でも、外部電源保持回路のMOSFET状態が不定にならないようにしてください。上記の概念図ではゲートプルアップが通常のOFF方向を与えますが、具体的な部品定数は実際のハードウェアに合わせて選定する必要があります。電源保持回路が異常により常時ONになると、暗電流が継続して車両バッテリーを放電させる可能性があります。
 
-The Arduino I/O must not directly switch window-motor current or vehicle battery current. D13 is a control signal for an appropriately designed external power-switch circuit.
+The Arduino I/O must not directly switch window-motor current or vehicle battery current. D13 is a control signal for the optocoupler / external power-switch circuit.
 
-Arduino I/Oでウインドウモーター電流や車両バッテリー電流を直接開閉してはいけません。D13は、適切に設計された外部電源スイッチ回路を制御するための信号です。
+Arduino I
