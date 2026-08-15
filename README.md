@@ -4,10 +4,6 @@ Arduino-based power-window controller for the Honda Beat (PP1), including manual
 
 ホンダ ビート（PP1）向けのArduinoベース・パワーウインドウコントローラーです。手動操作、左右同時オート動作、電流ベースの終点検出、パーシャルダウン、キーOFF後の電源保持を実装します。
 
-> **Repository status / リポジトリ状態**  
-> This repository is currently private and is being prepared for a future public release.  
-> 現在はPrivateで公開準備中です。内容確認後にPublic化する予定です。
-
 ## doroXer dark
 
 `doroXer dark` is the automotive / embedded-electronics side of doroXer. This repository contains the release-oriented version of the Honda Beat power-window controller project.
@@ -82,10 +78,18 @@ Default parameters / 初期設定値:
 
 ```text
 software/
-  v0.0/
-    pws_v0.0.ino
+  pws_v0_0/
+    pws_v0_0.ino
 docs/
 ```
+
+The Arduino sketch directory and the main `.ino` file use the same base name, so the sketch can be opened directly in the Arduino IDE.
+
+Arduinoスケッチのフォルダ名とメイン`.ino`ファイル名は同じベース名に統一しており、そのままArduino IDEで開ける構成です。
+
+The software version remains **v0.0**. The underscore form in `pws_v0_0` is used only for the Arduino sketch folder and filename.
+
+ソフトウェアのバージョン表記は**v0.0**のままです。`pws_v0_0`のアンダースコア表記はArduinoスケッチのフォルダ名・ファイル名にのみ使用します。
 
 The software version number is kept identical to the private development repository. Public-release preparation does not renumber the software.
 
